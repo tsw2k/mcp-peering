@@ -1,2 +1,169 @@
 # mcp-peering
-MCP server for integration with Peering Manager and PeeringDB
+
+Local [Model Context Protocol](https://modelcontextprotocol.io/) server that lets an
+LLM-driven assistant query and manage:
+
+- a self-hosted **[Peering Manager](https://github.com/peering-manager/peering-manager)**
+  instance via its REST API (`/api/`, token auth), and
+- the public **[PeeringDB](https://www.peeringdb.com/)** REST API.
+
+It is designed to run locally over stdio so it can be wired into Claude Desktop,
+Claude Code, Cursor, Continue, or any other MCP-aware client.
+
+## Features
+
+PeeringDB tools:
+
+| Tool | Purpose |
+| ---- | ------- |
+| `peeringdb_list_resources` | Enumerate supported PeeringDB resources. |
+| `peeringdb_search` | Generic search with Django-style filters and pagination. |
+| `peeringdb_get` | Fetch a single object by id. |
+| `peeringdb_get_network` | Look up a network by ASN (with optional inlined relations). |
+| `peeringdb_network_presence` | Show every IXP and facility where an ASN is present. |
+| `peeringdb_search_ix` | Search Internet Exchanges by name / country / city. |
+| `peeringdb_ix_members` | List networks present at an IX. |
+
+Peering Manager tools:
+
+| Tool | Purpose |
+| ---- | ------- |
+| `pm_endpoints` | List supported endpoint short-names. |
+| `pm_status` | Read `/api/status/` from your instance. |
+| `pm_list` / `pm_get` / `pm_create` / `pm_update` / `pm_delete` | Generic CRUD against any endpoint. |
+| `pm_find_autonomous_system` | Find an AS by ASN inside Peering Manager. |
+| `pm_sync_as_with_peeringdb` | Trigger `sync_with_peeringdb` for an AS. |
+| `pm_router_configuration` | Render the configuration for a router. |
+| `pm_poll_internet_exchange_sessions` | Trigger BGP session polling for an IX. |
+| `compare_as_with_peeringdb` | Diff an AS between Peering Manager and PeeringDB. |
+
+## Requirements
+
+- Python 3.10+
+- A Peering Manager API token (Admin → Users → API Tokens) for write/admin tools
+- (Optional) a [PeeringDB API key](https://docs.peeringdb.com/howto/api_keys/)
+
+## Installation
+
+```bash
+git clone https://github.com/tsw2k/mcp-peering.git
+cd mcp-peering
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+Or install from a local checkout into another environment:
+
+```bash
+pip install /path/to/mcp-peering
+```
+
+After installing the `mcp-peering` console script is available.
+
+## Configuration
+
+Copy `.env.example` to `.env` (or export the variables in your shell / MCP
+client config):
+
+```ini
+PEERING_MANAGER_URL=https://peering-manager.example.com
+PEERING_MANAGER_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+PEERING_MANAGER_VERIFY_SSL=true
+
+PEERINGDB_URL=https://www.peeringdb.com/api
+PEERINGDB_API_KEY=          # optional
+PEERINGDB_USERNAME=         # optional, legacy basic auth
+PEERINGDB_PASSWORD=
+
+HTTP_TIMEOUT=30
+```
+
+The PeeringDB tools work without credentials (rate-limited public access). The
+`pm_*` tools require both `PEERING_MANAGER_URL` and `PEERING_MANAGER_TOKEN`.
+
+## Running
+
+```bash
+mcp-peering        # stdio transport
+# or
+python -m mcp_peering
+```
+
+The server speaks MCP over stdio, so it is normally launched by your MCP client.
+
+### Claude Desktop / Claude Code
+
+Add an entry to `claude_desktop_config.json` (Desktop) or `~/.claude/mcp.json`
+(Code):
+
+```json
+{
+  "mcpServers": {
+    "peering": {
+      "command": "mcp-peering",
+      "env": {
+        "PEERING_MANAGER_URL": "https://peering-manager.example.com",
+        "PEERING_MANAGER_TOKEN": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "PEERINGDB_API_KEY": ""
+      }
+    }
+  }
+}
+```
+
+If `mcp-peering` is not on `PATH`, point `command` at the absolute path of the
+script inside your virtualenv (e.g. `/opt/mcp-peering/.venv/bin/mcp-peering`).
+
+### Cursor / Continue / other MCP clients
+
+Use the same launch line; any client that supports stdio MCP servers will work.
+
+## Example interactions
+
+- _"Find AS15169 in PeeringDB and show every IX where it is present."_ →
+  `peeringdb_network_presence` with `asn=15169`.
+- _"Compare what we have for AS64500 in Peering Manager vs PeeringDB and tell
+  me what differs."_ → `compare_as_with_peeringdb`.
+- _"Sync AS object 42 with PeeringDB."_ → `pm_sync_as_with_peeringdb`.
+- _"Render the configuration for router 7."_ → `pm_router_configuration`.
+- _"List BGP sessions on IX 3 with peeringdb_synced=False."_ →
+  `pm_list("internet-exchange-peering-sessions", filters={"internet_exchange_id": 3})`.
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest        # unit tests with mocked HTTP
+ruff check src tests
+```
+
+Tests use [`respx`](https://github.com/lundberg/respx) to mock both APIs, so
+no live credentials are required.
+
+## Project layout
+
+```
+src/mcp_peering/
+├── __init__.py
+├── __main__.py        # `python -m mcp_peering`
+├── config.py          # env-driven configuration
+├── peeringdb.py       # async PeeringDB REST client
+├── peering_manager.py # async Peering Manager REST client
+└── server.py          # FastMCP server + tool definitions
+tests/                 # mocked HTTP unit tests
+```
+
+## Security notes
+
+- The Peering Manager token grants the same permissions as the user that owns
+  it. Use a dedicated read-only token if you only need read tools.
+- Avoid setting `PEERING_MANAGER_VERIFY_SSL=false` outside of trusted lab
+  environments — it disables certificate verification.
+- Treat any tool calls that mutate state (`pm_create`, `pm_update`,
+  `pm_delete`, `pm_sync_*`, `pm_poll_*`) as privileged; review them before
+  approving in your MCP client.
+
+## License
+
+MIT
