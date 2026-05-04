@@ -35,10 +35,33 @@ class PeeringManagerConfig:
         return bool(self.base_url and self.token)
 
 
+VALID_TRANSPORTS = ("stdio", "streamable-http", "sse")
+
+
+@dataclass(frozen=True)
+class TransportConfig:
+    transport: str
+    host: str
+    port: int
+    path: str | None
+    auth_token: str | None
+
+    def __post_init__(self) -> None:
+        if self.transport not in VALID_TRANSPORTS:
+            raise ValueError(
+                f"Invalid transport '{self.transport}'. Use one of: {', '.join(VALID_TRANSPORTS)}"
+            )
+
+    @property
+    def is_network(self) -> bool:
+        return self.transport != "stdio"
+
+
 @dataclass(frozen=True)
 class Config:
     peeringdb: PeeringDBConfig
     peering_manager: PeeringManagerConfig
+    transport: TransportConfig
     http_timeout: float
 
 
@@ -54,6 +77,13 @@ def load_config() -> Config:
             base_url=(os.environ.get("PEERING_MANAGER_URL") or "").rstrip("/") or None,
             token=os.environ.get("PEERING_MANAGER_TOKEN") or None,
             verify_ssl=_bool(os.environ.get("PEERING_MANAGER_VERIFY_SSL"), default=True),
+        ),
+        transport=TransportConfig(
+            transport=os.environ.get("MCP_TRANSPORT", "stdio").strip().lower(),
+            host=os.environ.get("MCP_HOST", "127.0.0.1"),
+            port=int(os.environ.get("MCP_PORT", "8000")),
+            path=(os.environ.get("MCP_PATH") or None),
+            auth_token=os.environ.get("MCP_AUTH_TOKEN") or None,
         ),
         http_timeout=float(os.environ.get("HTTP_TIMEOUT", "30")),
     )
