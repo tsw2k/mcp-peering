@@ -7,8 +7,10 @@ LLM-driven assistant query and manage:
   instance via its REST API (`/api/`, token auth), and
 - the public **[PeeringDB](https://www.peeringdb.com/)** REST API.
 
-It is designed to run locally over stdio so it can be wired into Claude Desktop,
-Claude Code, Cursor, Continue, or any other MCP-aware client.
+It can run **locally over stdio** (spawned by your MCP client) **or as a remote
+network service** over Streamable HTTP / SSE with optional bearer-token
+authentication, so the same binary fits both single-user setups and a shared
+team deployment.
 
 ## Features
 
@@ -77,6 +79,13 @@ PEERINGDB_USERNAME=         # optional, legacy basic auth
 PEERINGDB_PASSWORD=
 
 HTTP_TIMEOUT=30
+
+# Transport (only needed when running as a network service)
+MCP_TRANSPORT=stdio          # stdio | streamable-http | sse
+MCP_HOST=127.0.0.1
+MCP_PORT=8000
+MCP_PATH=                    # default /mcp for streamable-http, /sse for sse
+MCP_AUTH_TOKEN=              # bearer token required on incoming HTTP/SSE requests
 ```
 
 The PeeringDB tools work without credentials (rate-limited public access). The
@@ -84,15 +93,74 @@ The PeeringDB tools work without credentials (rate-limited public access). The
 
 ## Running
 
+### Local (stdio)
+
 ```bash
-mcp-peering        # stdio transport
+mcp-peering        # default transport: stdio
 # or
 python -m mcp_peering
 ```
 
 The server speaks MCP over stdio, so it is normally launched by your MCP client.
 
-### Claude Desktop / Claude Code
+### Remote (HTTP / SSE)
+
+Run on a separate host so multiple clients (or remote Claude installations)
+can share the same server:
+
+```bash
+export MCP_AUTH_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')
+export PEERING_MANAGER_URL=https://peering-manager.example.com
+export PEERING_MANAGER_TOKEN=...
+
+mcp-peering \
+  --transport streamable-http \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+CLI flags (`--transport`, `--host`, `--port`, `--path`, `--auth-token`)
+override the corresponding `MCP_*` environment variables.
+
+When `MCP_AUTH_TOKEN` is set, the server requires
+`Authorization: Bearer <token>` on every incoming request and returns 401
+otherwise. **Never expose the server without either the bearer token or a
+trusted reverse proxy in front.** For TLS, terminate HTTPS in nginx / Caddy
+/ Traefik and proxy to `127.0.0.1:8000`.
+
+#### Example nginx in front of the server
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name mcp.example.com;
+    # ... ssl_certificate / ssl_certificate_key ...
+
+    location /mcp {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Forwarded-For $remote_addr;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        # Streamable HTTP / SSE need long-lived connections:
+        proxy_buffering    off;
+        proxy_read_timeout 1h;
+    }
+}
+```
+
+#### Docker
+
+```bash
+cp .env.example .env        # fill in the variables
+docker compose up -d --build
+```
+
+The provided `Dockerfile` runs as a non-root user and exposes port 8000;
+`docker-compose.yml` binds the port to `127.0.0.1` by default — add a reverse
+proxy / TLS for external access.
+
+### Claude Desktop / Claude Code (local stdio)
 
 Add an entry to `claude_desktop_config.json` (Desktop) or `~/.claude/mcp.json`
 (Code):
@@ -115,9 +183,38 @@ Add an entry to `claude_desktop_config.json` (Desktop) or `~/.claude/mcp.json`
 If `mcp-peering` is not on `PATH`, point `command` at the absolute path of the
 script inside your virtualenv (e.g. `/opt/mcp-peering/.venv/bin/mcp-peering`).
 
+### Connecting Claude to a remote server
+
+Claude Desktop launches stdio servers, so for a remote instance use the
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge — it speaks
+stdio to the client and proxies to your HTTP endpoint:
+
+```json
+{
+  "mcpServers": {
+    "peering": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.example.com/mcp",
+        "--header",
+        "Authorization: Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ]
+    }
+  }
+}
+```
+
+Clients with native HTTP/SSE MCP support (Cursor, Continue, recent Claude
+Code builds) can connect directly — point them at
+`https://mcp.example.com/mcp` and add the `Authorization` header.
+
 ### Cursor / Continue / other MCP clients
 
-Use the same launch line; any client that supports stdio MCP servers will work.
+For local use the stdio launch line above works. For network use, configure
+the client with the HTTP URL and the bearer token (see your client's docs
+for the exact field names).
 
 ## Example interactions
 
