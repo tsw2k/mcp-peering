@@ -36,6 +36,14 @@ def _parser() -> argparse.ArgumentParser:
         help="Bearer token required on incoming requests (env: MCP_AUTH_TOKEN).",
     )
     p.add_argument(
+        "--pm-readonly",
+        action="store_true",
+        help=(
+            "Read-only mode for Peering Manager: mutating tools (create/update/"
+            "delete, AS sync, session polling) are not registered (env: PM_READONLY)."
+        ),
+    )
+    p.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -62,6 +70,8 @@ def main(argv: list[str] | None = None) -> None:
         auth_token=args.auth_token if args.auth_token is not None else cfg.transport.auth_token,
     )
     cfg = replace(cfg, transport=transport)
+    if args.pm_readonly:
+        cfg = replace(cfg, peering_manager=replace(cfg.peering_manager, readonly=True))
 
     server = build_server(cfg)
 

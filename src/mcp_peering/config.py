@@ -18,6 +18,12 @@ class PeeringDBConfig:
     api_key: str | None
     username: str | None
     password: str | None
+    # GET responses are cached for this many seconds (0 disables caching).
+    cache_ttl: float = 300.0
+    # Maximum number of cached responses kept (LRU eviction).
+    cache_size: int = 128
+    # Outbound request cap, requests per second (0 disables the limiter).
+    rate_limit: float = 2.0
 
     @property
     def is_authenticated(self) -> bool:
@@ -29,6 +35,9 @@ class PeeringManagerConfig:
     base_url: str | None
     token: str | None
     verify_ssl: bool
+    # When true the server does not register mutating pm_* tools and the
+    # client rejects write requests outright.
+    readonly: bool = False
 
     @property
     def is_configured(self) -> bool:
@@ -72,11 +81,15 @@ def load_config() -> Config:
             api_key=os.environ.get("PEERINGDB_API_KEY") or None,
             username=os.environ.get("PEERINGDB_USERNAME") or None,
             password=os.environ.get("PEERINGDB_PASSWORD") or None,
+            cache_ttl=max(0.0, float(os.environ.get("PEERINGDB_CACHE_TTL", "300"))),
+            cache_size=max(0, int(os.environ.get("PEERINGDB_CACHE_SIZE", "128"))),
+            rate_limit=max(0.0, float(os.environ.get("PEERINGDB_RATE_LIMIT", "2"))),
         ),
         peering_manager=PeeringManagerConfig(
             base_url=(os.environ.get("PEERING_MANAGER_URL") or "").rstrip("/") or None,
             token=os.environ.get("PEERING_MANAGER_TOKEN") or None,
             verify_ssl=_bool(os.environ.get("PEERING_MANAGER_VERIFY_SSL"), default=True),
+            readonly=_bool(os.environ.get("PM_READONLY"), default=False),
         ),
         transport=TransportConfig(
             transport=os.environ.get("MCP_TRANSPORT", "stdio").strip().lower(),

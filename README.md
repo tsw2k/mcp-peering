@@ -19,12 +19,12 @@ PeeringDB tools:
 | Tool | Purpose |
 | ---- | ------- |
 | `peeringdb_list_resources` | Enumerate supported PeeringDB resources. |
-| `peeringdb_search` | Generic search with Django-style filters and pagination. |
+| `peeringdb_search` | Generic search with Django-style filters; pages are followed automatically. |
 | `peeringdb_get` | Fetch a single object by id. |
 | `peeringdb_get_network` | Look up a network by ASN (with optional inlined relations). |
 | `peeringdb_network_presence` | Show every IXP and facility where an ASN is present. |
 | `peeringdb_search_ix` | Search Internet Exchanges by name / country / city. |
-| `peeringdb_ix_members` | List networks present at an IX. |
+| `peeringdb_ix_members` | List networks present at an IX (auto-paginated). |
 
 Peering Manager tools:
 
@@ -32,12 +32,19 @@ Peering Manager tools:
 | ---- | ------- |
 | `pm_endpoints` | List supported endpoint short-names. |
 | `pm_status` | Read `/api/status/` from your instance. |
-| `pm_list` / `pm_get` / `pm_create` / `pm_update` / `pm_delete` | Generic CRUD against any endpoint. |
+| `pm_list` / `pm_get` | Read objects from any endpoint (`pm_list` auto-paginates). |
+| `pm_create` / `pm_update` / `pm_delete` | Generic CRUD against any endpoint (write mode only). |
 | `pm_find_autonomous_system` | Find an AS by ASN inside Peering Manager. |
-| `pm_sync_as_with_peeringdb` | Trigger `sync_with_peeringdb` for an AS. |
+| `pm_sync_as_with_peeringdb` | Trigger `sync_with_peeringdb` for an AS (write mode only). |
 | `pm_router_configuration` | Render the configuration for a router. |
-| `pm_poll_internet_exchange_sessions` | Trigger BGP session polling for an IX. |
+| `pm_poll_internet_exchange_sessions` | Trigger BGP session polling for an IX (write mode only). |
 | `compare_as_with_peeringdb` | Diff an AS between Peering Manager and PeeringDB. |
+
+PeeringDB GET responses are served from a TTL cache and outbound requests
+are spaced by a rate limiter, so agent loops that repeat similar queries do
+not hammer the public API (both tunable, see below). HTTP clients are shared
+across tool calls for the lifetime of the server, reusing connections and
+TLS sessions.
 
 ## Requirements
 
@@ -72,11 +79,16 @@ client config):
 PEERING_MANAGER_URL=https://peering-manager.example.com
 PEERING_MANAGER_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 PEERING_MANAGER_VERIFY_SSL=true
+PM_READONLY=false            # true: hide mutating pm_* tools entirely
 
 PEERINGDB_URL=https://www.peeringdb.com/api
 PEERINGDB_API_KEY=          # optional
 PEERINGDB_USERNAME=         # optional, legacy basic auth
 PEERINGDB_PASSWORD=
+
+PEERINGDB_CACHE_TTL=300     # seconds to cache PeeringDB GET responses (0 = off)
+PEERINGDB_CACHE_SIZE=128    # max cached responses (LRU eviction)
+PEERINGDB_RATE_LIMIT=2      # outbound PeeringDB requests per second (0 = off)
 
 HTTP_TIMEOUT=30
 
@@ -90,6 +102,15 @@ MCP_AUTH_TOKEN=              # bearer token required on incoming HTTP/SSE reques
 
 The PeeringDB tools work without credentials (rate-limited public access). The
 `pm_*` tools require both `PEERING_MANAGER_URL` and `PEERING_MANAGER_TOKEN`.
+
+### Read-only mode
+
+Set `PM_READONLY=true` (or pass `--pm-readonly`) to run against Peering Manager
+without any ability to change it: the mutating tools (`pm_create`, `pm_update`,
+`pm_delete`, `pm_sync_as_with_peeringdb`, `pm_poll_internet_exchange_sessions`)
+are not registered at all, so MCP clients cannot even discover them, and the
+API client additionally rejects write requests as a second line of defence.
+Combine it with a read-only API token for defence in depth.
 
 ## Running
 
@@ -119,8 +140,8 @@ mcp-peering \
   --port 8000
 ```
 
-CLI flags (`--transport`, `--host`, `--port`, `--path`, `--auth-token`)
-override the corresponding `MCP_*` environment variables.
+CLI flags (`--transport`, `--host`, `--port`, `--path`, `--auth-token`,
+`--pm-readonly`) override the corresponding environment variables.
 
 When `MCP_AUTH_TOKEN` is set, the server requires
 `Authorization: Bearer <token>` on every incoming request and returns 401
@@ -231,7 +252,7 @@ for the exact field names).
 
 ```bash
 pip install -e ".[dev]"
-pytest        # unit tests with mocked HTTP
+pytest        # unit tests with mocked HTTP (no install needed; see conftest.py)
 ruff check src tests
 ```
 
@@ -244,17 +265,22 @@ no live credentials are required.
 src/mcp_peering/
 ├── __init__.py
 ├── __main__.py        # `python -m mcp_peering`
+├── cache.py           # TTL cache for PeeringDB GET responses
 ├── config.py          # env-driven configuration
-├── peeringdb.py       # async PeeringDB REST client
-├── peering_manager.py # async Peering Manager REST client
-└── server.py          # FastMCP server + tool definitions
+├── peeringdb.py       # async PeeringDB REST client (cache + rate limit)
+├── peering_manager.py # async Peering Manager REST client (read-only guard)
+├── ratelimit.py       # minimum-interval async rate limiter
+├── server.py          # FastMCP server + tool definitions
+└── transport.py       # HTTP/SSE runner + bearer-token middleware
+conftest.py            # makes tests runnable from a checkout without install
 tests/                 # mocked HTTP unit tests
 ```
 
 ## Security notes
 
 - The Peering Manager token grants the same permissions as the user that owns
-  it. Use a dedicated read-only token if you only need read tools.
+  it. Use a dedicated read-only token if you only need read tools, and set
+  `PM_READONLY=true` so mutating tools are not even registered.
 - Avoid setting `PEERING_MANAGER_VERIFY_SSL=false` outside of trusted lab
   environments — it disables certificate verification.
 - Treat any tool calls that mutate state (`pm_create`, `pm_update`,
