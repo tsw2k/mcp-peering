@@ -8,14 +8,16 @@ from mcp_peering.peering_manager import (
     PeeringManagerClient,
     PeeringManagerError,
     PeeringManagerNotConfigured,
+    PeeringManagerReadOnlyError,
 )
 
 
-def _config() -> PeeringManagerConfig:
+def _config(readonly: bool = False) -> PeeringManagerConfig:
     return PeeringManagerConfig(
         base_url="https://pm.example.com",
         token="abc123",
         verify_ssl=True,
+        readonly=readonly,
     )
 
 
@@ -77,3 +79,57 @@ async def test_error_response(respx_mock):
             await client.get("routers", 99)
     assert exc.value.status_code == 404
     assert "Not found" in exc.value.message
+
+
+@pytest.mark.asyncio
+async def test_list_all_follows_pages(respx_mock):
+    route = respx_mock.get("https://pm.example.com/api/peering/routers/").mock(
+        side_effect=[
+            httpx.Response(200, json={"count": 3, "results": [{"id": 1}, {"id": 2}]}),
+            httpx.Response(200, json={"count": 3, "results": [{"id": 3}]}),
+        ]
+    )
+    async with PeeringManagerClient(_config()) as client:
+        data = await client.list_all("routers", max_results=10)
+    assert [row["id"] for row in data["results"]] == [1, 2, 3]
+    assert data["count"] == 3
+    assert route.calls.last.request.url.params["offset"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_list_all_respects_offset_and_cap(respx_mock):
+    route = respx_mock.get("https://pm.example.com/api/peering/routers/").mock(
+        side_effect=[
+            httpx.Response(200, json={"count": 9, "results": [{"id": 3}, {"id": 4}, {"id": 5}]}),
+            httpx.Response(200, json={"count": 9, "results": [{"id": 6}, {"id": 7}]}),
+        ]
+    )
+    async with PeeringManagerClient(_config()) as client:
+        data = await client.list_all("routers", offset=2, max_results=5)
+    assert [row["id"] for row in data["results"]] == [3, 4, 5, 6, 7]
+    assert data["count"] == 9
+    assert route.calls.last.request.url.params["offset"] == "5"
+
+
+@pytest.mark.asyncio
+async def test_readonly_rejects_mutations():
+    async with PeeringManagerClient(_config(readonly=True)) as client:
+        with pytest.raises(PeeringManagerReadOnlyError):
+            await client.create("routers", {"name": "r1"})
+        with pytest.raises(PeeringManagerReadOnlyError):
+            await client.update("routers", 1, {"name": "r1"})
+        with pytest.raises(PeeringManagerReadOnlyError):
+            await client.delete("routers", 1)
+        with pytest.raises(PeeringManagerReadOnlyError):
+            await client.action("autonomous-systems", 1, "sync_with_peeringdb")
+
+
+@pytest.mark.asyncio
+async def test_readonly_allows_reads(respx_mock):
+    route = respx_mock.get("https://pm.example.com/api/peering/routers/").mock(
+        return_value=httpx.Response(200, json={"count": 1, "results": [{"id": 1}]})
+    )
+    async with PeeringManagerClient(_config(readonly=True)) as client:
+        data = await client.list_all("routers", max_results=10)
+    assert data["results"] == [{"id": 1}]
+    assert route.called

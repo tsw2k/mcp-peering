@@ -11,6 +11,10 @@ import httpx
 
 from .config import PeeringManagerConfig
 
+# Rows requested per page when auto-paginating; Peering Manager's default
+# page size, safe to request explicitly.
+PAGE_SIZE = 50
+
 # Common endpoint paths (paginated list endpoints). Path is relative to /api/.
 ENDPOINTS: dict[str, str] = {
     "autonomous-systems": "peering/autonomous-systems",
@@ -44,6 +48,17 @@ class PeeringManagerError(RuntimeError):
         self.message = message
 
 
+class PeeringManagerReadOnlyError(PeeringManagerError):
+    """Raised when a mutating request is attempted in read-only mode."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            403,
+            "Peering Manager client is in read-only mode (PM_READONLY); "
+            "mutating requests are rejected",
+        )
+
+
 class PeeringManagerNotConfigured(RuntimeError):
     def __init__(self) -> None:
         super().__init__(
@@ -57,6 +72,7 @@ class PeeringManagerClient:
         if not config.is_configured:
             raise PeeringManagerNotConfigured()
         assert config.base_url and config.token
+        self._readonly = config.readonly
         self._client = httpx.AsyncClient(
             base_url=f"{config.base_url}/api",
             headers={
@@ -107,6 +123,10 @@ class PeeringManagerClient:
             return None
         return response.json()
 
+    def _ensure_writable(self) -> None:
+        if self._readonly:
+            raise PeeringManagerReadOnlyError()
+
     async def list(
         self,
         endpoint: str,
@@ -115,6 +135,7 @@ class PeeringManagerClient:
         limit: int = 50,
         offset: int = 0,
     ) -> dict[str, Any]:
+        """List a single page of objects from an endpoint."""
         path = f"/{self.resolve_endpoint(endpoint)}/"
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if filters:
@@ -122,11 +143,48 @@ class PeeringManagerClient:
         data = await self._request("GET", path, params=params)
         return data if isinstance(data, dict) else {"results": []}
 
+    async def list_all(
+        self,
+        endpoint: str,
+        *,
+        filters: dict[str, Any] | None = None,
+        offset: int = 0,
+        max_results: int | None = None,
+    ) -> dict[str, Any]:
+        """Collect ``results`` across DRF pages until exhausted or ``max_results``.
+
+        Returns the same shape as :meth:`list`; ``count`` is the total
+        reported by the API, ``results`` the aggregated rows.
+        """
+        if max_results is not None and max_results <= 0:
+            return {"count": 0, "results": []}
+        page_size = min(max_results, PAGE_SIZE) if max_results else PAGE_SIZE
+        results: list[dict[str, Any]] = []
+        total: int | None = None
+        position = offset
+        while True:
+            data = await self.list(endpoint, filters=filters, limit=page_size, offset=position)
+            page = data.get("results") or []
+            results.extend(page)
+            if isinstance(data.get("count"), int):
+                total = data["count"]
+            if not page:
+                break
+            if total is not None and offset + len(results) >= total:
+                break
+            if max_results is not None and len(results) >= max_results:
+                break
+            position += len(page)
+        if max_results is not None:
+            results = results[:max_results]
+        return {"count": total if total is not None else len(results), "results": results}
+
     async def get(self, endpoint: str, object_id: int) -> dict[str, Any] | None:
         path = f"/{self.resolve_endpoint(endpoint)}/{object_id}/"
         return await self._request("GET", path)
 
     async def create(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_writable()
         path = f"/{self.resolve_endpoint(endpoint)}/"
         return await self._request("POST", path, json=payload)
 
@@ -138,11 +196,13 @@ class PeeringManagerClient:
         *,
         partial: bool = True,
     ) -> dict[str, Any]:
+        self._ensure_writable()
         path = f"/{self.resolve_endpoint(endpoint)}/{object_id}/"
         method = "PATCH" if partial else "PUT"
         return await self._request(method, path, json=payload)
 
     async def delete(self, endpoint: str, object_id: int) -> None:
+        self._ensure_writable()
         path = f"/{self.resolve_endpoint(endpoint)}/{object_id}/"
         await self._request("DELETE", path)
 
@@ -156,6 +216,8 @@ class PeeringManagerClient:
         payload: dict[str, Any] | None = None,
     ) -> Any:
         """Invoke a custom detail action like ``sync_with_peeringdb``."""
+        if method.upper() != "GET":
+            self._ensure_writable()
         action = action.strip("/")
         path = f"/{self.resolve_endpoint(endpoint)}/{object_id}/{action}/"
         return await self._request(method, path, json=payload)
