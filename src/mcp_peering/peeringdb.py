@@ -92,7 +92,9 @@ class PeeringDBClient:
     def _cache_key(path: str, params: Any) -> tuple[Any, ...]:
         if not params:
             return (path,)
-        return (path, tuple(sorted(params.items())))
+        # repr() keeps the key hashable even when filter values are lists
+        # (e.g. {"asn__in": [1, 2]}); sorting makes it order-independent.
+        return (path, tuple((k, repr(v)) for k, v in sorted(params.items())))
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         cacheable = method == "GET"

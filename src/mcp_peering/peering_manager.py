@@ -16,28 +16,51 @@ from .config import PeeringManagerConfig
 PAGE_SIZE = 50
 
 # Common endpoint paths (paginated list endpoints). Path is relative to /api/.
+# Matches the URL layout of Peering Manager 1.9+ (verified against 1.10):
+# routers/configurations live under devices/, communities under bgp/,
+# jobs/object-changes under core/. Older installations that still expose
+# peering/routers etc. can pass explicit paths instead of short names.
 ENDPOINTS: dict[str, str] = {
+    # peering app
     "autonomous-systems": "peering/autonomous-systems",
     "bgp-groups": "peering/bgp-groups",
-    "communities": "peering/communities",
-    "configurations": "peering/configurations",
     "direct-peering-sessions": "peering/direct-peering-sessions",
     "internet-exchanges": "peering/internet-exchanges",
     "internet-exchange-peering-sessions": "peering/internet-exchange-peering-sessions",
-    "routers": "peering/routers",
     "routing-policies": "peering/routing-policies",
-    "email-templates": "peering/email-templates",
-    "connections": "net/connections",
+    # bgp app
+    "communities": "bgp/communities",
+    "relationships": "bgp/relationships",
+    # devices app
+    "routers": "devices/routers",
+    "configurations": "devices/configurations",
     "platforms": "devices/platforms",
-    "device-configurations": "devices/configurations",
+    # net app
+    "connections": "net/connections",
+    "bfd": "net/bfd",
+    # messaging app
     "contacts": "messaging/contacts",
     "contact-roles": "messaging/contact-roles",
     "contact-assignments": "messaging/contact-assignments",
     "emails": "messaging/emails",
+    # extras app
     "tags": "extras/tags",
-    "object-changes": "extras/object-changes",
     "webhooks": "extras/webhooks",
-    "jobs": "extras/jobs",
+    "ix-api": "extras/ix-api",
+    "config-contexts": "extras/config-contexts",
+    "export-templates": "extras/export-templates",
+    "journal-entries": "extras/journal-entries",
+    # core app
+    "jobs": "core/jobs",
+    "object-changes": "core/object-changes",
+    "data-sources": "core/data-sources",
+    "data-files": "core/data-files",
+    # local PeeringDB cache kept by Peering Manager
+    "peeringdb-networks": "peeringdb/networks",
+    "peeringdb-network-ixlans": "peeringdb/network-ixlans",
+    "peeringdb-facilities": "peeringdb/facilities",
+    "peeringdb-internet-exchanges": "peeringdb/internet-exchanges",
+    "peeringdb-synchronisations": "peeringdb/synchronisations",
 }
 
 
@@ -215,16 +238,20 @@ class PeeringManagerClient:
         method: str = "POST",
         payload: dict[str, Any] | None = None,
     ) -> Any:
-        """Invoke a custom detail action like ``sync_with_peeringdb``."""
+        """Invoke a custom detail action like ``sync-with-peeringdb``.
+
+        Peering Manager action URLs use dashes; underscores in ``action`` are
+        normalised so callers may use either spelling.
+        """
         if method.upper() != "GET":
             self._ensure_writable()
-        action = action.strip("/")
+        action = action.strip("/").replace("_", "-")
         path = f"/{self.resolve_endpoint(endpoint)}/{object_id}/{action}/"
         return await self._request(method, path, json=payload)
 
     async def router_configuration(self, router_id: int) -> dict[str, Any]:
         """Render the rendered configuration for a router."""
-        path = f"/peering/routers/{router_id}/configuration/"
+        path = f"/devices/routers/{router_id}/configuration/"
         data = await self._request("GET", path)
         return data if isinstance(data, dict) else {"configuration": data}
 
