@@ -28,7 +28,7 @@ def test_not_configured_raises():
 
 def test_endpoint_resolution():
     assert PeeringManagerClient.resolve_endpoint("autonomous-systems") == "peering/autonomous-systems"
-    assert PeeringManagerClient.resolve_endpoint("/peering/routers/") == "peering/routers"
+    assert PeeringManagerClient.resolve_endpoint("/devices/routers/") == "devices/routers"
     assert PeeringManagerClient.resolve_endpoint("custom/path") == "custom/path"
 
 
@@ -57,7 +57,7 @@ async def test_create_and_action(respx_mock):
         "https://pm.example.com/api/peering/autonomous-systems/"
     ).mock(return_value=httpx.Response(201, json={"id": 7, "asn": 64500}))
     action = respx_mock.post(
-        "https://pm.example.com/api/peering/autonomous-systems/7/sync_with_peeringdb/"
+        "https://pm.example.com/api/peering/autonomous-systems/7/sync-with-peeringdb/"
     ).mock(return_value=httpx.Response(200, json={"status": "ok"}))
 
     async with PeeringManagerClient(_config()) as client:
@@ -71,7 +71,7 @@ async def test_create_and_action(respx_mock):
 
 @pytest.mark.asyncio
 async def test_error_response(respx_mock):
-    respx_mock.get("https://pm.example.com/api/peering/routers/99/").mock(
+    respx_mock.get("https://pm.example.com/api/devices/routers/99/").mock(
         return_value=httpx.Response(404, json={"detail": "Not found."})
     )
     async with PeeringManagerClient(_config()) as client:
@@ -83,7 +83,7 @@ async def test_error_response(respx_mock):
 
 @pytest.mark.asyncio
 async def test_list_all_follows_pages(respx_mock):
-    route = respx_mock.get("https://pm.example.com/api/peering/routers/").mock(
+    route = respx_mock.get("https://pm.example.com/api/devices/routers/").mock(
         side_effect=[
             httpx.Response(200, json={"count": 3, "results": [{"id": 1}, {"id": 2}]}),
             httpx.Response(200, json={"count": 3, "results": [{"id": 3}]}),
@@ -98,7 +98,7 @@ async def test_list_all_follows_pages(respx_mock):
 
 @pytest.mark.asyncio
 async def test_list_all_respects_offset_and_cap(respx_mock):
-    route = respx_mock.get("https://pm.example.com/api/peering/routers/").mock(
+    route = respx_mock.get("https://pm.example.com/api/devices/routers/").mock(
         side_effect=[
             httpx.Response(200, json={"count": 9, "results": [{"id": 3}, {"id": 4}, {"id": 5}]}),
             httpx.Response(200, json={"count": 9, "results": [{"id": 6}, {"id": 7}]}),
@@ -109,6 +109,28 @@ async def test_list_all_respects_offset_and_cap(respx_mock):
     assert [row["id"] for row in data["results"]] == [3, 4, 5, 6, 7]
     assert data["count"] == 9
     assert route.calls.last.request.url.params["offset"] == "5"
+
+
+@pytest.mark.asyncio
+async def test_router_configuration_uses_devices_path(respx_mock):
+    route = respx_mock.get("https://pm.example.com/api/devices/routers/7/configuration/").mock(
+        return_value=httpx.Response(200, json={"configuration": "router bgp 64500"})
+    )
+    async with PeeringManagerClient(_config()) as client:
+        data = await client.router_configuration(7)
+    assert data == {"configuration": "router bgp 64500"}
+    assert route.called
+
+
+@pytest.mark.asyncio
+async def test_action_normalises_underscores_to_dashes(respx_mock):
+    route = respx_mock.post(
+        "https://pm.example.com/api/peering/internet-exchanges/3/poll-bgp-sessions/"
+    ).mock(return_value=httpx.Response(200, json={"status": "scheduled"}))
+    async with PeeringManagerClient(_config()) as client:
+        result = await client.action("internet-exchanges", 3, "poll_bgp_sessions")
+    assert result == {"status": "scheduled"}
+    assert route.called
 
 
 @pytest.mark.asyncio
@@ -126,7 +148,7 @@ async def test_readonly_rejects_mutations():
 
 @pytest.mark.asyncio
 async def test_readonly_allows_reads(respx_mock):
-    route = respx_mock.get("https://pm.example.com/api/peering/routers/").mock(
+    route = respx_mock.get("https://pm.example.com/api/devices/routers/").mock(
         return_value=httpx.Response(200, json={"count": 1, "results": [{"id": 1}]})
     )
     async with PeeringManagerClient(_config(readonly=True)) as client:

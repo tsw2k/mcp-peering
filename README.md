@@ -35,6 +35,7 @@ Peering Manager tools:
 | `pm_list` / `pm_get` | Read objects from any endpoint (`pm_list` auto-paginates). |
 | `pm_create` / `pm_update` / `pm_delete` | Generic CRUD against any endpoint (write mode only). |
 | `pm_find_autonomous_system` | Find an AS by ASN inside Peering Manager. |
+| `pm_action` | Invoke custom per-object actions (`shared-ixps`, `available-peers`, `test-napalm-connection`, ...). |
 | `pm_sync_as_with_peeringdb` | Trigger `sync_with_peeringdb` for an AS (write mode only). |
 | `pm_router_configuration` | Render the configuration for a router. |
 | `pm_poll_internet_exchange_sessions` | Trigger BGP session polling for an IX (write mode only). |
@@ -49,6 +50,11 @@ TLS sessions.
 ## Requirements
 
 - Python 3.10+
+- Peering Manager **1.9+** (endpoint short-names follow the current URL
+  layout: `devices/routers`, `bgp/communities`, `core/jobs`, dash-style
+  action URLs like `sync-with-peeringdb`; verified against 1.10). Older
+  installations can still be reached by passing explicit API paths to
+  `pm_list`/`pm_get` instead of short names.
 - A Peering Manager API token (Admin → Users → API Tokens) for write/admin tools
 - (Optional) a [PeeringDB API key](https://docs.peeringdb.com/howto/api_keys/)
 

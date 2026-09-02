@@ -148,6 +148,19 @@ async def test_get_responses_are_cached(respx_mock):
 
 
 @pytest.mark.asyncio
+async def test_cache_handles_list_filter_values(respx_mock):
+    # A list value (e.g. asn__in) must not break the cache key hashing.
+    route = respx_mock.get("https://www.peeringdb.com/api/net").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": 1}], "meta": {}})
+    )
+    async with PeeringDBClient(_config(cache_ttl=60, cache_size=16)) as client:
+        first = await client.list("net", filters={"asn__in": [15169, 13335]})
+        second = await client.list("net", filters={"asn__in": [15169, 13335]})
+    assert first == second == [{"id": 1}]
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_cache_entries_expire(respx_mock):
     route = respx_mock.get("https://www.peeringdb.com/api/net").mock(
         return_value=httpx.Response(200, json={"data": [{"id": 42}], "meta": {}})
