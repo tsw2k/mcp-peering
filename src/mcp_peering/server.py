@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -33,20 +34,28 @@ def build_server(config: Config | None = None) -> FastMCP:
 
     # HTTP clients are created lazily on first use and shared across tool
     # calls for the lifetime of the server, so connections and TLS sessions
-    # are reused instead of being re-established per call.
+    # are reused instead of being re-established per call. The lock keeps
+    # concurrent first calls from creating (and leaking) duplicate clients.
     pdb_client: PeeringDBClient | None = None
     pm_client: PeeringManagerClient | None = None
+    client_init_lock = asyncio.Lock()
 
     async def get_pdb() -> PeeringDBClient:
         nonlocal pdb_client
         if pdb_client is None:
-            pdb_client = PeeringDBClient(cfg.peeringdb, timeout=cfg.http_timeout)
+            async with client_init_lock:
+                if pdb_client is None:
+                    pdb_client = PeeringDBClient(cfg.peeringdb, timeout=cfg.http_timeout)
         return pdb_client
 
     async def get_pm() -> PeeringManagerClient:
         nonlocal pm_client
         if pm_client is None:
-            pm_client = PeeringManagerClient(cfg.peering_manager, timeout=cfg.http_timeout)
+            async with client_init_lock:
+                if pm_client is None:
+                    pm_client = PeeringManagerClient(
+                        cfg.peering_manager, timeout=cfg.http_timeout
+                    )
         return pm_client
 
     @asynccontextmanager
@@ -246,6 +255,26 @@ def build_server(config: Config | None = None) -> FastMCP:
         client = await get_pm()
         return await client.router_configuration(router_id)
 
+    @mcp.tool()
+    async def pm_action(
+        endpoint: str,
+        object_id: int,
+        action: str,
+        method: str = "GET",
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Invoke a custom per-object API action on a Peering Manager endpoint.
+
+        Read-only examples (method GET): ``as-set-prefixes``, ``shared-ixps``,
+        ``shared-facilities`` on ``autonomous-systems``; ``available-peers``,
+        ``prefixes`` on ``internet-exchanges``; ``test-napalm-connection`` on
+        ``routers``. Mutating actions (method POST, e.g. ``poll-bgp-sessions``,
+        ``import-sessions``) are rejected in read-only mode.
+        """
+        client = await get_pm()
+        result = await client.action(endpoint, object_id, action, method=method, payload=payload)
+        return result if isinstance(result, dict) else {"result": result}
+
     # Mutating tools (writes, syncs, polling) are only registered when the
     # server is not in read-only mode (PM_READONLY). With the flag set they
     # disappear from the tool list entirely, so a client cannot even attempt
@@ -282,19 +311,19 @@ def build_server(config: Config | None = None) -> FastMCP:
 
         @mcp.tool()
         async def pm_sync_as_with_peeringdb(autonomous_system_id: int) -> dict[str, Any]:
-            """Trigger ``sync_with_peeringdb`` on an autonomous system in Peering Manager."""
+            """Trigger ``sync-with-peeringdb`` on an autonomous system in Peering Manager."""
             client = await get_pm()
             result = await client.action(
-                "autonomous-systems", autonomous_system_id, "sync_with_peeringdb"
+                "autonomous-systems", autonomous_system_id, "sync-with-peeringdb"
             )
             return result if isinstance(result, dict) else {"result": result}
 
         @mcp.tool()
         async def pm_poll_internet_exchange_sessions(internet_exchange_id: int) -> dict[str, Any]:
-            """Trigger BGP session polling for an Internet Exchange."""
+            """Trigger BGP session polling (``poll-bgp-sessions``) for an Internet Exchange."""
             client = await get_pm()
             result = await client.action(
-                "internet-exchanges", internet_exchange_id, "poll_peering_sessions"
+                "internet-exchanges", internet_exchange_id, "poll-bgp-sessions"
             )
             return result if isinstance(result, dict) else {"result": result}
 
