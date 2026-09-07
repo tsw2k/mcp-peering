@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -89,10 +90,13 @@ class PeeringDBClient:
             )
 
     @staticmethod
-    def _cache_key(path: str, params: Any) -> tuple[Any, ...]:
+    def _cache_key(path: str, params: Any) -> str:
+        # urlencode rather than tuples: filter values may be lists (Django
+        # __in lookups), which are unhashable; the encoded form is a stable,
+        # hashable key with equivalent params colliding correctly.
         if not params:
-            return (path,)
-        return (path, tuple(sorted(params.items())))
+            return path
+        return f"{path}?{urlencode(sorted(params.items()), doseq=True)}"
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         cacheable = method == "GET"

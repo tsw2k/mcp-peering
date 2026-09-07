@@ -137,7 +137,9 @@ def build_server(config: Config | None = None) -> FastMCP:
         """Return where an ASN is present: IXPs (netixlan) and facilities (netfac).
 
         Pages are followed automatically until ``limit`` rows per category
-        have been collected.
+        have been collected. Large networks have hundreds of entries — lower
+        ``limit`` if you only need a sample, since every row is returned
+        verbatim.
         """
         client = await get_pdb()
         net = await client.get_network_by_asn(asn)
@@ -180,6 +182,8 @@ def build_server(config: Config | None = None) -> FastMCP:
 
         Pages are followed automatically until ``limit`` members have been
         collected, so large exchanges are handled without manual paging.
+        Big IXs have hundreds of members — lower ``limit`` if a sample is
+        enough, since every row is returned verbatim.
         """
         client = await get_pdb()
         return await client.list_all("netixlan", filters={"ix_id": ix_id}, max_results=limit)
