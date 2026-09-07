@@ -185,6 +185,20 @@ async def test_retry_after_429(respx_mock):
 
 
 @pytest.mark.asyncio
+async def test_list_valued_filters_with_cache_enabled(respx_mock):
+    """Regression: list filter values must not break the cache key (Django __in lookups)."""
+    route = respx_mock.get("https://www.peeringdb.com/api/net").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": 1}], "meta": {}})
+    )
+    async with PeeringDBClient(_config(cache_ttl=60, cache_size=16)) as client:
+        rows = await client.list("net", filters={"asn__in": [15169, 64512]})
+        again = await client.list("net", filters={"asn__in": [15169, 64512]})
+    assert rows == again == [{"id": 1}]
+    assert route.call_count == 1
+    assert route.calls.last.request.url.params.get_list("asn__in") == ["15169", "64512"]
+
+
+@pytest.mark.asyncio
 async def test_rate_limiter_spaces_calls():
     limiter = AsyncRateLimiter(rate=25)  # one slot every 40 ms
     import time

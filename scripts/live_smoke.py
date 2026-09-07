@@ -51,17 +51,26 @@ async def check_peeringdb(checks: Checks) -> None:
             (net or {}).get("name", "not found"),
         )
 
-        t0 = time.monotonic()
-        await client.get_network_by_asn(15169)
-        cached_ms = (time.monotonic() - t0) * 1000
-        checks.report("cache hit on repeat", cached_ms < 50, f"{cached_ms:.1f} ms")
+        if cfg.peeringdb.cache_ttl <= 0 or cfg.peeringdb.cache_size <= 0:
+            checks.report("cache hit on repeat", True, "skipped: caching disabled via env")
+        else:
+            t0 = time.monotonic()
+            await client.get_network_by_asn(15169)
+            cached_ms = (time.monotonic() - t0) * 1000
+            checks.report("cache hit on repeat", cached_ms < 50, f"{cached_ms:.1f} ms")
 
         ix = await client.list("ix", filters={"name__contains": "DE-CIX"}, limit=3)
         checks.report("IX name search", len(ix) > 0, ", ".join(i["name"] for i in ix[:3]))
 
         # DE-CIX Frankfurt (ix_id=31) has far more than one 250-row page.
+        # This check depends on live PeeringDB data: if it ever fits into a
+        # single page the row count in the detail explains why it failed.
         members = await client.list_all("netixlan", filters={"ix_id": 31}, max_results=600)
-        checks.report("auto-pagination past 250 rows", len(members) > 250, f"{len(members)} rows")
+        checks.report(
+            "auto-pagination past 250 rows",
+            len(members) > 250,
+            f"{len(members)} rows for ix 31 (DE-CIX Frankfurt)",
+        )
     finally:
         await client.aclose()
 
