@@ -120,9 +120,14 @@ MCP_AUTH_TOKEN=<token from §2>
 PEERING_MANAGER_URL=https://peering-manager.example.com
 PEERING_MANAGER_TOKEN=<pm-token>
 PEERING_MANAGER_VERIFY_SSL=true
+PM_READONLY=false               # true: mutating pm_* tools are not registered
 
 PEERINGDB_URL=https://www.peeringdb.com/api
 PEERINGDB_API_KEY=             # optional
+
+PEERINGDB_CACHE_TTL=300        # PeeringDB GET cache, seconds (0 = off)
+PEERINGDB_CACHE_SIZE=128       # cached responses kept (LRU)
+PEERINGDB_RATE_LIMIT=2         # outbound PeeringDB req/s (0 = unlimited)
 
 HTTP_TIMEOUT=30
 ```
@@ -294,9 +299,13 @@ docker compose exec mcp-peering python -c "import socket; socket.create_connecti
 | `PEERING_MANAGER_URL` | — | Base URL of your Peering Manager (no trailing `/api`). |
 | `PEERING_MANAGER_TOKEN` | — | API token (`Authorization: Token <token>`). |
 | `PEERING_MANAGER_VERIFY_SSL` | `true` | Set `false` only for trusted lab self-signed certs. |
+| `PM_READONLY` | `false` | `true`: mutating `pm_*` tools are not registered and the client rejects writes. |
 | `PEERINGDB_URL` | `https://www.peeringdb.com/api` | Override only if mirroring. |
 | `PEERINGDB_API_KEY` | empty | Optional API key. |
 | `PEERINGDB_USERNAME` / `PEERINGDB_PASSWORD` | empty | Legacy basic auth. |
+| `PEERINGDB_CACHE_TTL` | `300` | Seconds to cache PeeringDB GET responses (`0` disables). |
+| `PEERINGDB_CACHE_SIZE` | `128` | Maximum cached responses (LRU eviction). |
+| `PEERINGDB_RATE_LIMIT` | `2` | Outbound PeeringDB requests per second (`0` disables). |
 | `HTTP_TIMEOUT` | `30` | Outbound HTTP timeout (seconds). |
 | `MCP_TRANSPORT` | `stdio` | `stdio` / `streamable-http` / `sse`. |
 | `MCP_HOST` | `127.0.0.1` | Bind address for network transports. |
@@ -323,6 +332,12 @@ Mutating tools (`pm_create`, `pm_update`, `pm_delete`, `pm_sync_*`,
 `pm_poll_*`) act on the connected Peering Manager and are not reversible
 automatically. An agent should ask the user for confirmation before
 calling them unless explicit prior authorization exists.
+
+When `PM_READONLY=true` (env) or `--pm-readonly` (CLI) is set, these five
+tools are **not registered at all** — `tools/list` will not advertise them
+and calls are rejected by the server — and the API client refuses write
+requests as a second layer. Use this mode whenever the deployment only
+needs to read from Peering Manager.
 
 ## 8. Day-2 operations
 
@@ -376,6 +391,8 @@ Before exposing the server outside `127.0.0.1`, verify ALL of:
 - [ ] The Peering Manager API token is scoped to the minimum permissions
       the client actually needs. Prefer a read-only token unless mutating
       tools are intended to be used.
+- [ ] `PM_READONLY=true` unless mutating `pm_*` tools are intentionally
+      enabled (belt and braces alongside a read-only token).
 - [ ] The config file containing tokens is mode `0600`, owned by the
       service user.
 - [ ] Logs do not contain tokens. (mcp-peering does not log them by
@@ -393,7 +410,7 @@ Before exposing the server outside `127.0.0.1`, verify ALL of:
 | Network 502 from nginx | Service down or wrong upstream port. | `systemctl status mcp-peering`; check `proxy_pass` URL. |
 | Tools hang on PM calls | Outbound to PM blocked or `PEERING_MANAGER_URL` wrong. | `curl -H "Authorization: Token …" $PEERING_MANAGER_URL/api/status/`. |
 | `Peering Manager is not configured` error from a tool | `PEERING_MANAGER_URL` or `PEERING_MANAGER_TOKEN` missing. | Set them, restart the server. |
-| PeeringDB tools return 429 | Rate-limited; add an API key. | Set `PEERINGDB_API_KEY`. |
+| PeeringDB tools return 429 | Rate-limited upstream. The server already retries once and paces outbound calls via `PEERINGDB_RATE_LIMIT`. | Add `PEERINGDB_API_KEY`; if it persists, lower `PEERINGDB_RATE_LIMIT` (default `2`). |
 | Streaming responses cut off after 60 s | Reverse-proxy buffering or short timeout. | Add `proxy_buffering off` and increase `proxy_read_timeout`. |
 
 ## 11. One-shot agent recipe (TL;DR)

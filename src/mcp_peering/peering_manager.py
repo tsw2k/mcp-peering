@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from . import __version__
 from .config import PeeringManagerConfig
 
 # Rows requested per page when auto-paginating; Peering Manager's default
@@ -102,7 +103,7 @@ class PeeringManagerClient:
                 "Authorization": f"Token {config.token}",
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": "mcp-peering/0.1",
+                "User-Agent": f"mcp-peering/{__version__}",
             },
             verify=config.verify_ssl,
             timeout=timeout,

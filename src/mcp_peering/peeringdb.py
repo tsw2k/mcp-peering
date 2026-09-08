@@ -17,6 +17,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from . import __version__
 from .cache import TTLCache
 from .config import PeeringDBConfig
 from .ratelimit import AsyncRateLimiter
@@ -56,7 +57,7 @@ class PeeringDBClient:
         self._config = config
         headers: dict[str, str] = {
             "Accept": "application/json",
-            "User-Agent": "mcp-peering/0.1",
+            "User-Agent": f"mcp-peering/{__version__}",
         }
         auth: httpx.Auth | None = None
         if config.api_key:
