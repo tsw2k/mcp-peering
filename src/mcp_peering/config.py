@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def _bool(value: str | None, default: bool = True) -> bool:
@@ -47,6 +47,13 @@ class PeeringManagerConfig:
 VALID_TRANSPORTS = ("stdio", "streamable-http", "sse")
 
 
+def parse_list(value: str | None) -> list[str]:
+    """Parse a comma-separated value (env var or CLI argument) into a list."""
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 @dataclass(frozen=True)
 class TransportConfig:
     transport: str
@@ -54,6 +61,12 @@ class TransportConfig:
     port: int
     path: str | None
     auth_token: str | None
+    # Host/Origin values the transport accepts when DNS-rebinding protection
+    # is active (mcp 2.x enables it for localhost binds). Needed when the
+    # server sits behind a reverse proxy: the proxied request carries the
+    # public hostname, which must be listed here.
+    allowed_hosts: list[str] = field(default_factory=list)
+    allowed_origins: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.transport not in VALID_TRANSPORTS:
@@ -97,6 +110,8 @@ def load_config() -> Config:
             port=int(os.environ.get("MCP_PORT", "8000")),
             path=(os.environ.get("MCP_PATH") or None),
             auth_token=os.environ.get("MCP_AUTH_TOKEN") or None,
+            allowed_hosts=parse_list(os.environ.get("MCP_ALLOWED_HOSTS")),
+            allowed_origins=parse_list(os.environ.get("MCP_ALLOWED_ORIGINS")),
         ),
         http_timeout=float(os.environ.get("HTTP_TIMEOUT", "30")),
     )

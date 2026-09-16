@@ -73,20 +73,19 @@ async def test_unconfigured_pm_still_lists_read_tools():
 async def test_tool_call_reuses_cached_client(respx_mock):
     """Two identical tool calls must hit PeeringDB once (shared client + TTL cache).
 
-    Runs through a real in-memory MCP session so the FastMCP lifespan — and
-    with it the guaranteed client shutdown — is exercised too.
+    Runs through a real in-process MCP client session so the server lifespan
+    — and with it the guaranteed client shutdown — is exercised too.
     """
-    from mcp.shared.memory import create_connected_server_and_client_session
+    from mcp import Client
 
     route = respx_mock.get(url__regex=r"https://www\.peeringdb\.com/api/net").mock(
         return_value=httpx.Response(200, json={"data": [{"id": 1, "asn": 15169}], "meta": {}})
     )
     mcp = build_server(_config())
-    async with create_connected_server_and_client_session(mcp) as session:
-        await session.initialize()
+    async with Client(mcp) as client:
         for _ in range(2):
-            result = await session.call_tool(
+            result = await client.call_tool(
                 "peeringdb_search", {"resource": "net", "filters": {"asn": 15169}}
             )
-        assert not result.isError
+        assert not result.is_error
     assert route.call_count == 1

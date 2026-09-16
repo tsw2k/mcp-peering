@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from .config import Config, load_config
 from .peering_manager import ENDPOINTS as PM_ENDPOINTS
@@ -29,7 +29,7 @@ def _unset(value: Any) -> Any:
     return None if value in (None, "") else value
 
 
-def build_server(config: Config | None = None) -> FastMCP:
+def build_server(config: Config | None = None) -> MCPServer:
     cfg = config or load_config()
 
     # HTTP clients are created lazily on first use and shared across tool
@@ -59,7 +59,7 @@ def build_server(config: Config | None = None) -> FastMCP:
         return pm_client
 
     @asynccontextmanager
-    async def _lifespan(_server: FastMCP) -> AsyncIterator[None]:
+    async def _lifespan(_server: MCPServer) -> AsyncIterator[None]:
         try:
             yield
         finally:
@@ -68,7 +68,7 @@ def build_server(config: Config | None = None) -> FastMCP:
             if pm_client is not None:
                 await pm_client.aclose()
 
-    mcp = FastMCP(
+    mcp = MCPServer(
         name="mcp-peering",
         instructions=(
             "Tools for interrogating PeeringDB and a local Peering Manager instance. "
