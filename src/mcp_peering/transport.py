@@ -9,9 +9,59 @@ from typing import TYPE_CHECKING
 from .config import TransportConfig
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server import MCPServer
 
 logger = logging.getLogger(__name__)
+
+# Loopback hostnames used by mcp's automatic DNS-rebinding protection.
+_LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def _transport_security(cfg: TransportConfig):
+    """Build the transport security settings for the network transports.
+
+    mcp 2.x auto-enables DNS-rebinding protection when the app is built for a
+    loopback host, rejecting any request whose ``Host`` header is not
+    loopback. That would silently break every documented deployment here:
+    bind to 127.0.0.1, put nginx/Caddy in front, and let it forward the
+    public hostname (the SDK answers 421 to those requests).
+
+    So the protection is applied only when the operator opts in by listing
+    their proxy's hostname in ``MCP_ALLOWED_HOSTS`` (and optionally
+    ``MCP_ALLOWED_ORIGINS``). Without it we keep the pre-2.x behaviour and
+    say so loudly, because a missing allowlist then means "rejected", not
+    "unprotected".
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    if not cfg.allowed_hosts and not cfg.allowed_origins:
+        logger.warning(
+            "DNS-rebinding protection is disabled (no MCP_ALLOWED_HOSTS set). "
+            "The bearer token is the only request-level check in front of the "
+            "service; set MCP_ALLOWED_HOSTS (comma-separated, ports allowed as "
+            "':*') to enable host/origin validation."
+        )
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+    allowed_hosts = list(cfg.allowed_hosts)
+    for local in _LOCAL_HOSTS:
+        if f"{local}:*" not in allowed_hosts:
+            allowed_hosts.append(f"{local}:*")
+    allowed_origins = list(cfg.allowed_origins)
+    for local in _LOCAL_HOSTS:
+        if f"http://{local}:*" not in allowed_origins:
+            allowed_origins.append(f"http://{local}:*")
+
+    logger.info(
+        "DNS-rebinding protection enabled: hosts=%s origins=%s",
+        allowed_hosts,
+        allowed_origins,
+    )
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
 
 
 class BearerAuthMiddleware:
@@ -57,28 +107,26 @@ class BearerAuthMiddleware:
         )
 
 
-def run_network(server: FastMCP, transport_cfg: TransportConfig) -> None:
+def run_network(server: MCPServer, transport_cfg: TransportConfig) -> None:
     """Serve ``server`` over HTTP/SSE using uvicorn.
 
-    For ``streamable-http`` we mount :meth:`FastMCP.streamable_http_app`;
-    for ``sse`` we mount :meth:`FastMCP.sse_app`. Optional bearer auth wraps
+    For ``streamable-http`` we mount :meth:`MCPServer.streamable_http_app`;
+    for ``sse`` we mount :meth:`MCPServer.sse_app`. Optional bearer auth wraps
     the resulting ASGI app.
     """
     import uvicorn
 
-    server.settings.host = transport_cfg.host
-    server.settings.port = transport_cfg.port
+    security = _transport_security(transport_cfg)
 
     if transport_cfg.transport == "streamable-http":
-        if transport_cfg.path:
-            server.settings.streamable_http_path = transport_cfg.path
-        app = server.streamable_http_app()
-        path = server.settings.streamable_http_path
+        path = transport_cfg.path or "/mcp"
+        app = server.streamable_http_app(
+            streamable_http_path=path,
+            transport_security=security,
+        )
     elif transport_cfg.transport == "sse":
-        if transport_cfg.path:
-            server.settings.sse_path = transport_cfg.path
-        app = server.sse_app()
-        path = server.settings.sse_path
+        path = transport_cfg.path or "/sse"
+        app = server.sse_app(sse_path=path, transport_security=security)
     else:
         raise ValueError(f"run_network does not support transport '{transport_cfg.transport}'")
 

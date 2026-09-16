@@ -11,7 +11,7 @@ import logging
 import sys
 from dataclasses import replace
 
-from .config import VALID_TRANSPORTS, load_config
+from .config import VALID_TRANSPORTS, load_config, parse_list
 from .server import build_server
 
 
@@ -44,6 +44,21 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--allowed-hosts",
+        help=(
+            "Comma-separated Host values accepted when DNS-rebinding protection "
+            "is on, e.g. 'mcp.example.com,127.0.0.1:*' (env: MCP_ALLOWED_HOSTS)."
+        ),
+    )
+    p.add_argument(
+        "--allowed-origins",
+        help=(
+            "Comma-separated Origin values accepted when DNS-rebinding "
+            "protection is on, e.g. 'https://mcp.example.com' "
+            "(env: MCP_ALLOWED_ORIGINS)."
+        ),
+    )
+    p.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -68,6 +83,8 @@ def main(argv: list[str] | None = None) -> None:
         port=args.port if args.port is not None else cfg.transport.port,
         path=args.path if args.path is not None else cfg.transport.path,
         auth_token=args.auth_token if args.auth_token is not None else cfg.transport.auth_token,
+        allowed_hosts=parse_list(args.allowed_hosts) or cfg.transport.allowed_hosts,
+        allowed_origins=parse_list(args.allowed_origins) or cfg.transport.allowed_origins,
     )
     cfg = replace(cfg, transport=transport)
     if args.pm_readonly:

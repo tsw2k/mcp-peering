@@ -117,6 +117,10 @@ MCP_HOST=127.0.0.1            # bind locally; expose via reverse proxy
 MCP_PORT=8000
 MCP_AUTH_TOKEN=<token from §2>
 
+# Accept the public hostname the reverse proxy forwards (see §4.5).
+MCP_ALLOWED_HOSTS=mcp.example.com,127.0.0.1:*
+MCP_ALLOWED_ORIGINS=https://mcp.example.com
+
 PEERING_MANAGER_URL=https://peering-manager.example.com
 PEERING_MANAGER_TOKEN=<pm-token>
 PEERING_MANAGER_VERIFY_SSL=true
@@ -201,7 +205,38 @@ mcp.example.com {
 }
 ```
 
-### 4.5 Verify the server
+### 4.5 Host / Origin validation (mcp 2.x)
+
+mcp 2.x includes DNS-rebinding protection. Left at its default for a loopback
+bind (`MCP_HOST=127.0.0.1`, the layout above) it accepts only `127.0.0.1` and
+`localhost` in the `Host` header and answers **421 Misdirected Request** to
+anything else — including the public hostname nginx forwards. The server does
+not enable that protection by default; set the allowlist to turn it on:
+
+```ini
+MCP_ALLOWED_HOSTS=mcp.example.com,127.0.0.1:*
+MCP_ALLOWED_ORIGINS=https://mcp.example.com
+```
+
+Behaviour to expect:
+
+| `MCP_ALLOWED_HOSTS` | Host header `mcp.example.com` | Host header `127.0.0.1:8000` |
+| ------------------- | ----------------------------- | ---------------------------- |
+| unset (default)     | accepted (no host validation) | accepted                     |
+| `mcp.example.com`   | accepted                      | accepted (loopback kept)     |
+| `other.example.com` | **421 rejected**              | accepted (loopback kept)     |
+
+Loopback is always kept in the allowlist so `curl http://127.0.0.1:8000/mcp`
+health checks keep working. If a request suddenly returns 421 after an upgrade,
+the `Host` it carried is not in the allowlist — add it and restart.
+
+Failure modes:
+- **421 Misdirected Request** → the forwarded `Host` is missing from
+  `MCP_ALLOWED_HOSTS` (see table above).
+- **403 Forbidden with an Origin header** → the requesting Origin is not in
+  `MCP_ALLOWED_ORIGINS`.
+
+### 4.6 Verify the server
 
 From the server host:
 
@@ -233,7 +268,7 @@ Failure modes:
 - **401 with correct token** → token mismatch; the value in `/etc/mcp-peering.env` and the one the client sends must be identical.
 - **200 GET on /mcp** → the server isn't actually reached; nginx is serving a default site.
 
-### 4.6 Connect a client
+### 4.7 Connect a client
 
 **Claude Desktop / Claude Code** (stdio-only clients) via
 [`mcp-remote`](https://www.npmjs.com/package/mcp-remote):
@@ -312,6 +347,8 @@ docker compose exec mcp-peering python -c "import socket; socket.create_connecti
 | `MCP_PORT` | `8000` | Bind port. |
 | `MCP_PATH` | `/mcp` or `/sse` | URL path mounted by the server. |
 | `MCP_AUTH_TOKEN` | empty | Required bearer token; if empty, **no authentication is enforced**. |
+| `MCP_ALLOWED_HOSTS` | empty | Comma-separated `Host` values accepted when DNS-rebinding protection is on; enables it. Ports as `:*`. |
+| `MCP_ALLOWED_ORIGINS` | empty | Comma-separated `Origin` values accepted; loopback origins always included. |
 
 CLI flags (`mcp-peering --help`) override the matching env vars.
 
@@ -356,7 +393,7 @@ needs to read from Peering Manager.
    - systemd: `sudo systemctl restart mcp-peering`
    - Docker: `docker compose up -d`
 3. Update the token in every client config and restart those clients.
-4. Smoke-test (§4.5) with the new token.
+4. Smoke-test (§4.6) with the new token.
 
 ### 8.3 Rotate the Peering Manager token
 
@@ -393,6 +430,8 @@ Before exposing the server outside `127.0.0.1`, verify ALL of:
       tools are intended to be used.
 - [ ] `PM_READONLY=true` unless mutating `pm_*` tools are intentionally
       enabled (belt and braces alongside a read-only token).
+- [ ] `MCP_ALLOWED_HOSTS` lists the public hostname(s) so DNS-rebinding
+      protection is active in front of the proxy (see §4.5).
 - [ ] The config file containing tokens is mode `0600`, owned by the
       service user.
 - [ ] Logs do not contain tokens. (mcp-peering does not log them by
@@ -407,6 +446,7 @@ Before exposing the server outside `127.0.0.1`, verify ALL of:
 | `mcp-peering: command not found` | venv not activated or not on `PATH`. | Use the absolute path or activate the venv. |
 | Client shows "MCP server failed to start" (stdio) | Bad path to executable or missing env vars. | Re-check the JSON config; run the same command in a shell. |
 | Network 401 on every request, token correct | Whitespace/quoting around `MCP_AUTH_TOKEN` in env file. | Re-set without quotes/spaces. |
+| Network **421 Misdirected Request** | Forwarded `Host` not in `MCP_ALLOWED_HOSTS`; protection is on (mcp 2.x). | Add the public hostname to `MCP_ALLOWED_HOSTS`, restart (§4.5). |
 | Network 502 from nginx | Service down or wrong upstream port. | `systemctl status mcp-peering`; check `proxy_pass` URL. |
 | Tools hang on PM calls | Outbound to PM blocked or `PEERING_MANAGER_URL` wrong. | `curl -H "Authorization: Token …" $PEERING_MANAGER_URL/api/status/`. |
 | `Peering Manager is not configured` error from a tool | `PEERING_MANAGER_URL` or `PEERING_MANAGER_TOKEN` missing. | Set them, restart the server. |

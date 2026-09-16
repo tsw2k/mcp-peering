@@ -104,6 +104,8 @@ MCP_HOST=127.0.0.1
 MCP_PORT=8000
 MCP_PATH=                    # default /mcp for streamable-http, /sse for sse
 MCP_AUTH_TOKEN=              # bearer token required on incoming HTTP/SSE requests
+MCP_ALLOWED_HOSTS=           # enable host validation, e.g. mcp.example.com
+MCP_ALLOWED_ORIGINS=         # optional Origin allowlist, e.g. https://mcp.example.com
 ```
 
 The PeeringDB tools work without credentials (rate-limited public access). The
@@ -147,7 +149,27 @@ mcp-peering \
 ```
 
 CLI flags (`--transport`, `--host`, `--port`, `--path`, `--auth-token`,
-`--pm-readonly`) override the corresponding environment variables.
+`--allowed-hosts`, `--allowed-origins`, `--pm-readonly`) override the
+corresponding environment variables.
+
+#### Host / Origin validation
+
+mcp 2.x ships DNS-rebinding protection that validates the `Host` (and
+`Origin`) header. Left at its default for a loopback bind it accepts only
+`127.0.0.1` / `localhost`, which **rejects the public hostname a reverse
+proxy forwards** (HTTP 421). This server therefore keeps that protection off
+unless you opt in:
+
+```ini
+MCP_ALLOWED_HOSTS=mcp.example.com,127.0.0.1:*
+MCP_ALLOWED_ORIGINS=https://mcp.example.com
+```
+
+With `MCP_ALLOWED_HOSTS` set, requests carrying any other `Host` are rejected
+with 421 before reaching the tools; loopback is always kept allowed so local
+health checks keep working. Leave both unset and host validation is skipped
+entirely — in that case the bearer token is the only request-level check, so
+enable them whenever the server is reachable through a proxy.
 
 When `MCP_AUTH_TOKEN` is set, the server requires
 `Authorization: Bearer <token>` on every incoming request and returns 401
@@ -276,7 +298,7 @@ src/mcp_peering/
 ├── peeringdb.py       # async PeeringDB REST client (cache + rate limit)
 ├── peering_manager.py # async Peering Manager REST client (read-only guard)
 ├── ratelimit.py       # minimum-interval async rate limiter
-├── server.py          # FastMCP server + tool definitions
+├── server.py          # MCPServer (mcp 2.x) + tool definitions
 └── transport.py       # HTTP/SSE runner + bearer-token middleware
 conftest.py            # makes tests runnable from a checkout without install
 tests/                 # mocked HTTP unit tests
