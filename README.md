@@ -106,6 +106,9 @@ MCP_PATH=                    # default /mcp for streamable-http, /sse for sse
 MCP_AUTH_TOKEN=              # bearer token required on incoming HTTP/SSE requests
 MCP_ALLOWED_HOSTS=           # enable host validation, e.g. mcp.example.com
 MCP_ALLOWED_ORIGINS=         # optional Origin allowlist, e.g. https://mcp.example.com
+
+DO_NOT_TRACK=1               # telemetry opt-out; keep set
+OTEL_SDK_DISABLED=true       # disables the OTel middleware mcp 2.x enables by default
 ```
 
 The PeeringDB tools work without credentials (rate-limited public access). The
@@ -119,6 +122,14 @@ without any ability to change it: the mutating tools (`pm_create`, `pm_update`,
 are not registered at all, so MCP clients cannot even discover them, and the
 API client additionally rejects write requests as a second line of defence.
 Combine it with a read-only API token for defence in depth.
+
+### Telemetry
+
+None is sent. mcp 2.x enables an OpenTelemetry middleware by default, which
+records nothing unless an OTel exporter is installed; `DO_NOT_TRACK=1` and
+`OTEL_SDK_DISABLED=true` are set in the `Dockerfile` and passed through by
+`docker-compose.yml` so it stays inert even if one ever is. Keep both set in
+your own deployments.
 
 ## Running
 
