@@ -134,6 +134,10 @@ PEERINGDB_CACHE_SIZE=128       # cached responses kept (LRU)
 PEERINGDB_RATE_LIMIT=2         # outbound PeeringDB req/s (0 = unlimited)
 
 HTTP_TIMEOUT=30
+
+# No telemetry from this deployment (see §6).
+DO_NOT_TRACK=1
+OTEL_SDK_DISABLED=true
 ```
 
 ### 4.3 systemd unit
@@ -349,8 +353,15 @@ docker compose exec mcp-peering python -c "import socket; socket.create_connecti
 | `MCP_AUTH_TOKEN` | empty | Required bearer token; if empty, **no authentication is enforced**. |
 | `MCP_ALLOWED_HOSTS` | empty | Comma-separated `Host` values accepted when DNS-rebinding protection is on; enables it. Ports as `:*`. |
 | `MCP_ALLOWED_ORIGINS` | empty | Comma-separated `Origin` values accepted; loopback origins always included. |
+| `DO_NOT_TRACK` | `1` | Cross-tool telemetry opt-out. Keep set. |
+| `OTEL_SDK_DISABLED` | `true` | Disables OpenTelemetry. mcp 2.x enables an OTel middleware by default; it records nothing unless an exporter is installed, and this keeps it inert if one ever is. Keep set. |
 
 CLI flags (`mcp-peering --help`) override the matching env vars.
+
+The `Dockerfile` already sets `DO_NOT_TRACK=1` and `OTEL_SDK_DISABLED=true`,
+and `docker-compose.yml` passes them through, so container deployments are
+covered before first start. For systemd deployments keep them in
+`/etc/mcp-peering.env` as shown in §4.2.
 
 ## 7. Tools the LLM can call
 
@@ -432,6 +443,8 @@ Before exposing the server outside `127.0.0.1`, verify ALL of:
       enabled (belt and braces alongside a read-only token).
 - [ ] `MCP_ALLOWED_HOSTS` lists the public hostname(s) so DNS-rebinding
       protection is active in front of the proxy (see §4.5).
+- [ ] `DO_NOT_TRACK=1` and `OTEL_SDK_DISABLED=true` are set, so no usage
+      reporting can leave the host (§6).
 - [ ] The config file containing tokens is mode `0600`, owned by the
       service user.
 - [ ] Logs do not contain tokens. (mcp-peering does not log them by
@@ -464,6 +477,8 @@ python3 -m venv .venv && . .venv/bin/activate && pip install -e .
 export MCP_AUTH_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
 
 # 3. Start (foreground; switch to systemd / docker for production)
+DO_NOT_TRACK=1 \
+OTEL_SDK_DISABLED=true \
 MCP_TRANSPORT=streamable-http \
 MCP_HOST=0.0.0.0 \
 MCP_PORT=8000 \
