@@ -108,7 +108,7 @@ MCP_ALLOWED_HOSTS=           # enable host validation, e.g. mcp.example.com
 MCP_ALLOWED_ORIGINS=         # optional Origin allowlist, e.g. https://mcp.example.com
 
 DO_NOT_TRACK=1               # telemetry opt-out; keep set
-OTEL_SDK_DISABLED=true       # disables the OTel middleware mcp 2.x enables by default
+OTEL_SDK_DISABLED=true       # OpenTelemetry kill switch; keep set
 ```
 
 The PeeringDB tools work without credentials (rate-limited public access). The
@@ -125,11 +125,13 @@ Combine it with a read-only API token for defence in depth.
 
 ### Telemetry
 
-None is sent. mcp 2.x enables an OpenTelemetry middleware by default, which
-records nothing unless an OTel exporter is installed; `DO_NOT_TRACK=1` and
-`OTEL_SDK_DISABLED=true` are set in the `Dockerfile` and passed through by
-`docker-compose.yml` so it stays inert even if one ever is. Keep both set in
-your own deployments.
+None is sent. mcp 2.x wraps every inbound message in an OpenTelemetry span
+by default; this server removes that middleware at start-up, so it emits no
+spans of its own even if an OTel exporter is installed. `DO_NOT_TRACK=1` and
+`OTEL_SDK_DISABLED=true` are additionally set in the `Dockerfile` and passed
+through by `docker-compose.yml`: they cover the spans the SDK emits on
+outbound requests (which have no off switch in code; this server sends none)
+and any other software on the host. Keep both set in your own deployments.
 
 ## Running
 

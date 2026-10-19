@@ -29,6 +29,29 @@ def _unset(value: Any) -> Any:
     return None if value in (None, "") else value
 
 
+def _is_telemetry_middleware(middleware: Any) -> bool:
+    """Recognise the OpenTelemetry middleware mcp 2.x installs by default.
+
+    Matched by name instead of importing it from the SDK's private
+    ``mcp.server._otel`` module, so an SDK refactor cannot break start-up.
+    """
+    cls = type(middleware)
+    return "opentelemetry" in cls.__name__.lower() or cls.__module__.endswith("._otel")
+
+
+def _drop_telemetry_middleware(server: MCPServer) -> None:
+    """Remove the per-message OpenTelemetry middleware from ``server``.
+
+    No telemetry leaves our deployments. mcp 2.x wraps every inbound message
+    in an OTel span by default; it is inert until an exporter is installed,
+    but we do not want that to hinge on nobody ever installing one. The
+    deployment configs also set ``OTEL_SDK_DISABLED=true``, which remains the
+    only switch for the spans the SDK emits on outbound requests (it has no
+    seam for those yet; this server does not send any).
+    """
+    server.middleware[:] = [m for m in server.middleware if not _is_telemetry_middleware(m)]
+
+
 def build_server(config: Config | None = None) -> MCPServer:
     cfg = config or load_config()
 
@@ -81,6 +104,7 @@ def build_server(config: Config | None = None) -> MCPServer:
         ),
         lifespan=_lifespan,
     )
+    _drop_telemetry_middleware(mcp)
 
     # ---------------------------------------------------------------------
     # PeeringDB tools
