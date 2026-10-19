@@ -7,6 +7,12 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
+      # No telemetry from our infrastructure: generic opt-out plus the
+      # OpenTelemetry kill switch (mcp 2.x enables an OTel middleware by
+      # default; it is inert without an exporter, this keeps it inert even
+      # if one is ever installed).
+      DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
+      OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
       MCP_TRANSPORT: streamable-http
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8000
