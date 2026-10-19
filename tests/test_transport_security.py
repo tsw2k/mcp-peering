@@ -122,3 +122,74 @@ async def test_configured_security_accepts_listed_proxy_host():
             },
         )
     assert response.status_code == 200, response.text
+
+
+def _initialize_status(security, host: str, origin: str | None = None) -> int:
+    """POST an MCP initialize carrying ``host`` (and ``origin``); return the status code."""
+    from starlette.testclient import TestClient
+
+    from mcp_peering.server import build_server
+    from tests.test_server import _config
+
+    app = build_server(_config()).streamable_http_app(
+        streamable_http_path="/mcp", transport_security=security
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "Host": host,
+    }
+    if origin is not None:
+        headers["Origin"] = origin
+    with TestClient(app) as client:
+        response = client.post(
+            "/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "t", "version": "0"},
+                },
+            },
+            headers=headers,
+        )
+    return response.status_code
+
+
+def _protected():
+    return _transport_security(
+        _transport(
+            allowed_hosts=["mcp.example.com"],
+            allowed_origins=["https://mcp.example.com"],
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "evil.example",  # unrelated host: the DNS-rebinding case itself
+        "mcp.example.com.evil.example",  # lookalike that starts with the listed name
+        "evil.example:8000",
+    ],
+)
+def test_allowlist_rejects_unlisted_host(host):
+    """With an allowlist the protection must actually reject, not only accept."""
+    assert _initialize_status(_protected(), host) == 421
+
+
+def test_allowlist_keeps_loopback_reachable():
+    assert _initialize_status(_protected(), "127.0.0.1:8000") == 200
+    assert _initialize_status(_protected(), "localhost:8000") == 200
+
+
+def test_allowlist_rejects_unlisted_origin():
+    assert _initialize_status(_protected(), "mcp.example.com", "https://evil.example") == 403
+
+
+def test_allowlist_accepts_listed_and_loopback_origin():
+    assert _initialize_status(_protected(), "mcp.example.com", "https://mcp.example.com") == 200
+    assert _initialize_status(_protected(), "mcp.example.com", "http://localhost:3000") == 200
