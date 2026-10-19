@@ -354,7 +354,7 @@ docker compose exec mcp-peering python -c "import socket; socket.create_connecti
 | `MCP_ALLOWED_HOSTS` | empty | Comma-separated `Host` values accepted when DNS-rebinding protection is on; enables it. Ports as `:*`. |
 | `MCP_ALLOWED_ORIGINS` | empty | Comma-separated `Origin` values accepted; loopback origins always included. |
 | `DO_NOT_TRACK` | `1` | Cross-tool telemetry opt-out. Keep set. |
-| `OTEL_SDK_DISABLED` | `true` | Disables OpenTelemetry process-wide. The server already removes the per-message OTel middleware mcp 2.x installs; this also covers the SDK's outbound-request spans, which have no off switch in code. Keep set. |
+| `OTEL_SDK_DISABLED` | `true` | Disables OpenTelemetry process-wide. The server already silences the MCP SDK's own tracing in code; this is the second layer and also covers other software on the host. Keep set. |
 
 CLI flags (`mcp-peering --help`) override the matching env vars.
 

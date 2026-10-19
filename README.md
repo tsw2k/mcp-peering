@@ -125,13 +125,14 @@ Combine it with a read-only API token for defence in depth.
 
 ### Telemetry
 
-None is sent. mcp 2.x wraps every inbound message in an OpenTelemetry span
-by default; this server removes that middleware at start-up, so it emits no
-spans of its own even if an OTel exporter is installed. `DO_NOT_TRACK=1` and
-`OTEL_SDK_DISABLED=true` are additionally set in the `Dockerfile` and passed
-through by `docker-compose.yml`: they cover the spans the SDK emits on
-outbound requests (which have no off switch in code; this server sends none)
-and any other software on the host. Keep both set in your own deployments.
+None is sent. mcp 2.x traces by default — a SERVER span per inbound message
+and a CLIENT span per outbound request. At start-up this server removes the
+SDK's tracing middleware and swaps its tracer for a no-op one
+(`src/mcp_peering/telemetry.py`), so it emits no spans even if an OTel
+exporter is installed. `DO_NOT_TRACK=1` and `OTEL_SDK_DISABLED=true` are also
+set in the `Dockerfile` and passed through by `docker-compose.yml` as a second,
+process-wide layer that covers other software on the host too. Keep both set
+in your own deployments.
 
 ## Running
 
@@ -312,6 +313,7 @@ src/mcp_peering/
 ├── peering_manager.py # async Peering Manager REST client (read-only guard)
 ├── ratelimit.py       # minimum-interval async rate limiter
 ├── server.py          # MCPServer (mcp 2.x) + tool definitions
+├── telemetry.py       # silences the MCP SDK's built-in OpenTelemetry tracing
 └── transport.py       # HTTP/SSE runner + bearer-token middleware
 conftest.py            # makes tests runnable from a checkout without install
 tests/                 # mocked HTTP unit tests

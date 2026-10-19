@@ -8,8 +8,8 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       # No telemetry from our infrastructure: generic opt-out plus the
-      # OpenTelemetry kill switch. The server drops mcp 2.x's per-message
-      # OTel middleware itself; this also covers the SDK's outbound spans.
+      # OpenTelemetry kill switch. The server silences the MCP SDK's own
+      # tracing in code; these are the second, process-wide layer.
       DO_NOT_TRACK: ${DO_NOT_TRACK:-1}
       OTEL_SDK_DISABLED: ${OTEL_SDK_DISABLED:-true}
       MCP_TRANSPORT: streamable-http
