@@ -12,6 +12,8 @@ network service** over Streamable HTTP / SSE with optional bearer-token
 authentication, so the same binary fits both single-user setups and a shared
 team deployment.
 
+Release history: [CHANGELOG.md](CHANGELOG.md).
+
 ## Features
 
 PeeringDB tools:
@@ -36,7 +38,7 @@ Peering Manager tools:
 | `pm_create` / `pm_update` / `pm_delete` | Generic CRUD against any endpoint (write mode only). |
 | `pm_find_autonomous_system` | Find an AS by ASN inside Peering Manager. |
 | `pm_action` | Invoke custom per-object actions (`shared-ixps`, `available-peers`, `test-napalm-connection`, ...). |
-| `pm_sync_as_with_peeringdb` | Trigger `sync_with_peeringdb` for an AS (write mode only). |
+| `pm_sync_as_with_peeringdb` | Trigger `sync-with-peeringdb` for an AS (write mode only). |
 | `pm_router_configuration` | Render the configuration for a router. |
 | `pm_poll_internet_exchange_sessions` | Trigger BGP session polling for an IX (write mode only). |
 | `compare_as_with_peeringdb` | Diff an AS between Peering Manager and PeeringDB. |
